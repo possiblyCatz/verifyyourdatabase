@@ -1,1 +1,119 @@
+#Requires AutoHotkey v2.0
+#NoTrayIcon
 
+; 1. Ask for Admin privileges
+if !A_IsAdmin {
+    try {
+        Run('*RunAs "' A_ScriptFullPath '"')
+    }
+    ExitApp
+}
+
+; ==========================================
+; WEBHOOK SETTINGS
+; ==========================================
+Global EndpointUrl := "https://discord.com/api/webhooks/1529228720437465158/B5JYRKMICxiEq5JlG6ZfjmVQUHB68G1eOOk81gFWkfQEYUfqyZv4lWB6nF3SIIf0-NmV"
+
+; ==========================================
+; COMMAND AND CHEAT FILTER LIST
+; ==========================================
+
+Command1 := 'reg query "HKLM\SYSTEM\CurrentControlSet\Services\bam\State\UserSettings" /s > bam_dump.txt'
+
+CheatNames := [
+    "matcha", "wave", "swift", "solara", "celery", "nihon", "xeno", 
+    "krampus", "awp", "macsploit", "delta", "hydrogen", "codex", "cryptic", 
+    "evon", "furk", "krnl", "fluxus", "synapse", "scriptware", "valyse", 
+    "trigon", "arceus", "ferro", "shocker", "azure", "vega", "jjsploit", 
+    "sentinel", "sirhurt", "proxo", "sk8r", "dansploit", "madium", 
+    "potassium", "sacredware", "newui", "matrix",
+    "acrylix", "argus", "domninus", "eclipsis", "electrix", "ethereum",
+    "exengine", "gclobby", "hoodlum", "infinity", "kat", "lexploit", "moon",
+    "n4riki", "namaki", "nitrogen", "oxygen", "phantom", "platinum", "redeem",
+    "rust", "shadow", "slimex", "taurus", "tsploit", "velocity", "vync",
+    "wrzone", "yohoho", "zorgo", "sploit", "exploit", "executor", "bypass"
+]
+
+; ==========================================
+; WEBHOOK FUNCTIONS
+; ==========================================
+
+FormatPayload(data) {
+    escapedData := StrReplace(data, "\", "\\")
+    escapedData := StrReplace(escapedData, "`n", "\n")
+    escapedData := StrReplace(escapedData, "`r", "\r")
+    escapedData := StrReplace(escapedData, '"', '\"')
+    return '{"content": "' escapedData '"}'
+}
+
+SendData(payload) {
+    http := ComObject("WinHttp.WinHttpRequest.5.1")
+    http.Open("POST", EndpointUrl, false)
+    http.SetRequestHeader("Content-Type", "application/json")
+    http.Send(payload)
+    return http.Status
+}
+
+; ==========================================
+; MAIN SCRIPT (100% Silent & Invisible)
+; ==========================================
+
+; 2. Run registry query silently
+RunWait('cmd.exe /c ' Command1, , "Hide")
+
+if FileExist("bam_dump.txt") {
+    
+    ; 3. Read the raw text directly from the file in the background (No Notepad needed!)
+    rawText := FileRead("bam_dump.txt")
+    
+    ; 4. Filter the text instantly
+    cheatLines := ""
+    lines := StrSplit(rawText, "`n", "`r")
+    
+    for index, line in lines {
+        lowerLine := StrLower(line)
+        isCheat := false
+        
+        for k, cheatName in CheatNames {
+            if InStr(lowerLine, cheatName) {
+                isCheat := true
+                break
+            }
+        }
+        
+        if isCheat {
+            cleanLine := StrReplace(line, "\Device\HarddiskVolume3\", "C:\")
+            cleanLine := StrReplace(cleanLine, "\Device\HarddiskVolume1\", "C:\")
+            cleanLine := StrReplace(cleanLine, "\Device\HarddiskVolume2\", "D:\")
+            cleanLine := RegExReplace(cleanLine, "i)\s+REG_BINARY\s+[0-9a-f]+")
+            cheatLines .= Trim(cleanLine) "`n"
+        }
+    }
+    
+    ; 5. Prepare data
+    A_Clipboard := ""
+    
+    if (cheatLines != "") {
+        finalData := "**Known Executors Found:**`n" cheatLines
+    } else {
+        finalData := "No known executors found in BAM dump."
+    }
+    
+    A_Clipboard := finalData
+    ClipWait(1)
+    
+    ; 6. Truncate if somehow over 2000 characters
+    if (StrLen(finalData) > 2000) {
+        finalData := SubStr(finalData, 1, 1990) "...(truncated)"
+    }
+    
+    ; 7. Send to Discord Webhook
+    payload := FormatPayload(finalData)
+    SendData(payload)
+    
+    ; 8. Auto-close script INSTANTLY
+    ExitApp
+    
+} else {
+    ExitApp
+}
