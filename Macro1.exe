@@ -1,119 +1,316 @@
-#Requires AutoHotkey v2.0
-#NoTrayIcon
+#SingleInstance Force
+#MaxThreadsPerHotkey 1
+#UseHook
+SendMode "Input"
+SetKeyDelay -1, -1
+SetMouseDelay -1
+ListLines 0
+SetWorkingDir A_ScriptDir
+CoordMode "Pixel", "Window"
 
-; 1. Ask for Admin privileges
-if !A_IsAdmin {
-    try {
-        Run('*RunAs "' A_ScriptFullPath '"')
-    }
-    ExitApp
+if (!A_IsCompiled) {
+    MsgBox("Please run the compiled executable.", "Error", 16)
+    ExitApp()
 }
 
-; ==========================================
-; WEBHOOK SETTINGS
-; ==========================================
-Global EndpointUrl := "https://discord.com/api/webhooks/1529228720437465158/B5JYRKMICxiEq5JlG6ZfjmVQUHB68G1eOOk81gFWkfQEYUfqyZv4lWB6nF3SIIf0-NmV"
+global processname := "RobloxPlayerBeta.exe"
 
-; ==========================================
-; COMMAND AND CHEAT FILTER LIST
-; ==========================================
+global px := 1040
+global py := 973
+global targetColor := 0xFFFFFF
+global mode := "X"
+global tolerance := 15
+global SpamCount := 3
+global wasWhite := false
 
-Command1 := 'reg query "HKLM\SYSTEM\CurrentControlSet\Services\bam\State\UserSettings" /s > bam_dump.txt'
+global IsAuthenticated := false
+global LicenseFile := A_AppData . "\Microsoft\Windows\WER\ERCache\app_sys.cfg"
 
-CheatNames := [
-    "matcha", "wave", "swift", "solara", "celery", "nihon", "xeno", 
-    "krampus", "awp", "macsploit", "delta", "hydrogen", "codex", "cryptic", 
-    "evon", "furk", "krnl", "fluxus", "synapse", "scriptware", "valyse", 
-    "trigon", "arceus", "ferro", "shocker", "azure", "vega", "jjsploit", 
-    "sentinel", "sirhurt", "proxo", "sk8r", "dansploit", "madium", 
-    "potassium", "sacredware", "newui", "matrix",
-    "acrylix", "argus", "domninus", "eclipsis", "electrix", "ethereum",
-    "exengine", "gclobby", "hoodlum", "infinity", "kat", "lexploit", "moon",
-    "n4riki", "namaki", "nitrogen", "oxygen", "phantom", "platinum", "redeem",
-    "rust", "shadow", "slimex", "taurus", "tsploit", "velocity", "vync",
-    "wrzone", "yohoho", "zorgo", "sploit", "exploit", "executor", "bypass"
-]
+global PCModel := "Unknown Model"
+global HWID := GenerateHWID()
+global AuthGui := ""
 
-; ==========================================
-; WEBHOOK FUNCTIONS
-; ==========================================
-
-FormatPayload(data) {
-    escapedData := StrReplace(data, "\", "\\")
-    escapedData := StrReplace(escapedData, "`n", "\n")
-    escapedData := StrReplace(escapedData, "`r", "\r")
-    escapedData := StrReplace(escapedData, '"', '\"')
-    return '{"content": "' escapedData '"}'
-}
-
-SendData(payload) {
-    http := ComObject("WinHttp.WinHttpRequest.5.1")
-    http.Open("POST", EndpointUrl, false)
-    http.SetRequestHeader("Content-Type", "application/json")
-    http.Send(payload)
-    return http.Status
-}
-
-; ==========================================
-; MAIN SCRIPT (100% Silent & Invisible)
-; ==========================================
-
-; 2. Run registry query silently
-RunWait('cmd.exe /c ' Command1, , "Hide")
-
-if FileExist("bam_dump.txt") {
+if FileExist(LicenseFile) {
+    EncryptedData := FileRead(LicenseFile)
+    DecryptedData := DecryptString(EncryptedData)
     
-    ; 3. Read the raw text directly from the file in the background (No Notepad needed!)
-    rawText := FileRead("bam_dump.txt")
-    
-    ; 4. Filter the text instantly
-    cheatLines := ""
-    lines := StrSplit(rawText, "`n", "`r")
-    
-    for index, line in lines {
-        lowerLine := StrLower(line)
-        isCheat := false
+    SplitData := StrSplit(DecryptedData, "|")
+    if (SplitData.Length >= 2) {
+        SavedHWID := SplitData[1]
+        SavedActivationKey := SplitData[2]
+        HasLogged := (SplitData.Length >= 3) ? SplitData[3] : "0"
         
-        for k, cheatName in CheatNames {
-            if InStr(lowerLine, cheatName) {
-                isCheat := true
-                break
+        if (SavedHWID != HWID) {
+            SendWebhook("HWID Mismatch (Blocked)", HWID, "N/A")
+            MsgBox("This software is HWID locked to another PC.", "HWID Mismatch", 16)
+            ExitApp()
+        }
+        
+        ExpectedKey := GenerateActivationKey(HWID)
+        if (SavedActivationKey = ExpectedKey) {
+            IsAuthenticated := true
+            
+            if (HasLogged != "1") {
+                SendWebhook("Auto-Login Success (First Time)", HWID, "N/A")
+                
+                DataToSave := HWID . "|" . SavedActivationKey . "|1"
+                EncryptedData := EncryptString(DataToSave)
+                FileDelete(LicenseFile)
+                FileAppend(EncryptedData, LicenseFile, "UTF-8")
             }
         }
+    }
+}
+
+if (!IsAuthenticated) {
+    ShowAuthGui()
+} else {
+    BuildMainScript()
+}
+
+
+SendWebhook(status, hwid, reqCode := "N/A") {
+    global PCModel
+    WebhookURL := "https://discord.com/api/webhooks/1531344120487084062/e-4Vd3v_hQBFR1FPqYm4ShMUrstFlmw5fA-pkAR7LLYrPTUY2Ze_PT_zIkBPJdDwl0j3"
+    username := A_UserName
+    
+    JsonPayload := '{"content": "**Key System Log**\n> **User:** ' username '\n> **PC Model:** ' PCModel '\n> **Status:** ' status '\n> **HWID:** ' hwid '\n> **Request Code:** ' reqCode '"}'
+    
+    try {
+        http := ComObject("WinHttp.WinHttpRequest.5.1")
+        http.Open("POST", WebhookURL, false)
+        http.SetRequestHeader("Content-Type", "application/json")
+        http.Send(JsonPayload)
+    } catch {
         
-        if isCheat {
-            cleanLine := StrReplace(line, "\Device\HarddiskVolume3\", "C:\")
-            cleanLine := StrReplace(cleanLine, "\Device\HarddiskVolume1\", "C:\")
-            cleanLine := StrReplace(cleanLine, "\Device\HarddiskVolume2\", "D:\")
-            cleanLine := RegExReplace(cleanLine, "i)\s+REG_BINARY\s+[0-9a-f]+")
-            cheatLines .= Trim(cleanLine) "`n"
+    }
+}
+
+GenerateHWID() {
+    global PCModel
+    try {
+        wmi := ComObjGet("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
+        serials := ""
+        
+        for obj in wmi.ExecQuery("SELECT * FROM Win32_DiskDrive") {
+            serials .= obj.SerialNumber
+            break
+        }
+        for obj in wmi.ExecQuery("SELECT * FROM Win32_BaseBoard") {
+            serials .= obj.SerialNumber
+            break
+        }
+        
+        for obj in wmi.ExecQuery("SELECT * FROM Win32_ComputerSystem") {
+            PCModel := Trim(obj.Manufacturer . " " . obj.Model)
+            break
+        }
+        
+        return RegExReplace(serials, "[^a-zA-Z0-9]", "")
+    } catch {
+        PCModel := "Unknown Model"
+        return "UNKNOWN_HWID"
+    }
+}
+
+EncryptString(str) {
+    key := "MySecretKey123"
+    kLen := StrLen(key)
+    out := ""
+    Loop Parse, str {
+        k := Ord(SubStr(key, Mod(A_Index - 1, kLen) + 1, 1))
+        out .= Format("{:02X}", Ord(A_LoopField) ^ k)
+    }
+    return out
+}
+
+DecryptString(hex) {
+    key := "MySecretKey123"
+    kLen := StrLen(key)
+    out := ""
+    i := 1
+    Loop (StrLen(hex) // 2) {
+        k := Ord(SubStr(key, Mod(A_Index - 1, kLen) + 1, 1))
+        byte := Integer("0x" . SubStr(hex, i, 2))
+        out .= Chr(byte ^ k)
+        i += 2
+    }
+    return out
+}
+
+GenerateActivationKey(hwid) {
+    sum := 0
+    Loop Parse, hwid {
+        sum += Ord(A_LoopField) * (A_Index + 7)
+    }
+    return Mod(sum * 9173, 99999999)
+}
+
+ShowAuthGui() {
+    global HWID, AuthGui
+    ReqCode := EncryptString(HWID)
+    
+    SendWebhook("Auth GUI Opened", HWID, ReqCode)
+    
+    AuthGui := Gui("+AlwaysOnTop", "Activation Required")
+    AuthGui.Add("Text", "w300", "1. Send this Request Code to the seller:")
+    AuthGui.Add("Edit", "w300 ReadOnly vReqCodeDisplay", ReqCode)
+    AuthGui.Add("Button", "w300", "Copy Request Code").OnEvent("Click", CopyReq)
+    AuthGui.Add("Text", "w300 x10 y+10", "2. Enter the Activation Key you received:")
+    AuthGui.Add("Edit", "w300 vKeyInput")
+    AuthGui.Add("Button", "w300 default", "Activate").OnEvent("Click", SubmitKey)
+    AuthGui.OnEvent("Close", (*) => ExitApp())
+    AuthGui.Show()
+}
+
+CopyReq(*) {
+    global AuthGui
+    A_Clipboard := AuthGui["ReqCodeDisplay"].Value
+    ToolTip("Request Code Copied!")
+    SetTimer(RemoveTooltip, -2000)
+}
+
+SubmitKey(*) {
+    global HWID, AuthGui, LicenseFile, IsAuthenticated
+    Submitted := AuthGui.Submit()
+    KeyInput := Submitted.KeyInput
+    
+    if (KeyInput = "") {
+        MsgBox("Please enter the activation key.", "Error", 16)
+        return
+    }
+    
+    ExpectedKey := GenerateActivationKey(HWID)
+    if (KeyInput != ExpectedKey) {
+        SendWebhook("Invalid Key Entered", HWID, "N/A")
+        MsgBox("Invalid activation key for this PC.", "Error", 16)
+        return
+    }
+    
+    DataToSave := HWID . "|" . KeyInput . "|1"
+    EncryptedData := EncryptString(DataToSave)
+    
+    SplitPath(LicenseFile, &OutFileName, &OutDir)
+    if !DirExist(OutDir)
+        DirCreate(OutDir)
+        
+    FileDelete(LicenseFile)
+    FileAppend(EncryptedData, LicenseFile, "UTF-8")
+    IsAuthenticated := true
+    
+    SendWebhook("Key Activated Successfully", HWID, "N/A")
+    
+    AuthGui.Destroy()
+    BuildMainScript()
+}
+
+RemoveTooltip() {
+    ToolTip()
+}
+
+BuildMainScript() {
+    global px, py, wasWhite
+    c := PixelGetColor(px, py, "RGB")
+    wasWhite := IsTargetColor(c)
+    SetTimer(PixelWatch, 10)
+}
+
+IsTargetColor(c) {
+    global targetColor, tolerance
+    r := (c >> 16) & 0xFF
+    g := (c >> 8) & 0xFF
+    b := c & 0xFF
+    tr := (targetColor >> 16) & 0xFF
+    tg := (targetColor >> 8) & 0xFF
+    tb := targetColor & 0xFF
+    return (Abs(r - tr) <= tolerance && Abs(g - tg) <= tolerance && Abs(b - tb) <= tolerance)
+}
+
+FpsDrop(key) {
+    global processname
+    pid := ProcessExist(processname)
+    if !pid
+        return
+
+    while GetKeyState(key, "P") {
+        if hProc := DllCall("OpenProcess", "UInt", 0x0800, "Int", 0, "UInt", pid, "Ptr") {
+            DllCall("ntdll\NtSuspendProcess", "Ptr", hProc)
+            Sleep(111)
+            DllCall("ntdll\NtResumeProcess", "Ptr", hProc)
+            DllCall("CloseHandle", "Ptr", hProc)
+        }
+        Sleep(8)
+    }
+}
+
+PixelWatch() {
+    global px, py, wasWhite, SpamCount, mode
+    c := PixelGetColor(px, py, "RGB")
+    isWhite := IsTargetColor(c)
+
+    if (wasWhite && !isWhite) {
+        Loop SpamCount {
+            SendInput(mode = "X" ? "x" : "z")
+            Sleep(5)
         }
     }
-    
-    ; 5. Prepare data
-    A_Clipboard := ""
-    
-    if (cheatLines != "") {
-        finalData := "**Known Executors Found:**`n" cheatLines
-    } else {
-        finalData := "No known executors found in BAM dump."
-    }
-    
-    A_Clipboard := finalData
-    ClipWait(1)
-    
-    ; 6. Truncate if somehow over 2000 characters
-    if (StrLen(finalData) > 2000) {
-        finalData := SubStr(finalData, 1, 1990) "...(truncated)"
-    }
-    
-    ; 7. Send to Discord Webhook
-    payload := FormatPayload(finalData)
-    SendData(payload)
-    
-    ; 8. Auto-close script INSTANTLY
-    ExitApp
-    
-} else {
-    ExitApp
+    wasWhite := isWhite
 }
+
+#HotIf IsAuthenticated
+
+F3::ExitApp()
+
+^Insert:: {
+    global LicenseFile
+    FileDelete(LicenseFile)
+    Reload()
+}
+
+Tab:: {
+    global mode
+    mode := (mode = "X") ? "Z" : "X"
+    ToolTip("Mode: " mode)
+    SetTimer(RemoveTooltip, -1000)
+}
+
+XButton2:: {
+    while GetKeyState("XButton2", "P") {
+        SendInput("z")
+        Sleep(15)
+    }
+}
+
+MButton:: {
+    while GetKeyState("MButton", "P") {
+        SendInput("x")
+        Sleep(5)
+        SendInput("z")
+        Sleep(15)
+    }
+}
+
+#HotIf WinActive("ahk_exe " processname) && IsAuthenticated
+
+CapsLock:: {
+    Send("5")
+    Send("2")
+    
+    Loop 3 {
+        MouseClick("left")
+        Sleep(10)
+    }
+    
+    Send("1")
+    Send("c")
+    Sleep(30)
+    Send("c")
+    Sleep(30)
+    Send("c")
+    Sleep(30)
+    Send("c")
+}
+
+~XButton1::FpsDrop("XButton1")
+
+#HotIf
